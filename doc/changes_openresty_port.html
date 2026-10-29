@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>OpenResty Port Changes</title>
+<meta charset="utf-8">
+<meta name="Copyright" content="Copyright (C) 2005-2026">
+<meta name="Language" content="zh">
+<link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
+<link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
+<style type="text/css">
+table.port {
+  line-height: 1.2;
+}
+tr.porthead td {
+  font-weight: bold;
+}
+td.portfeat {
+  width: 26%;
+}
+td.portwhere {
+  width: 44%;
+}
+td.portnote {
+  width: 30%;
+}
+td.portitem {
+  width: 42%;
+}
+</style>
+</head>
+<body>
+<div id="site">
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+</div>
+<div id="head">
+<h1>OpenResty Port Changes</h1>
+</div>
+<div id="nav">
+<ul><li>
+<a href="luajit.html">LuaJIT</a>
+<ul><li>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+</li><li>
+<a href="install.html">Installation</a>
+</li><li>
+<a href="running.html">Running</a>
+</li></ul>
+</li><li>
+<a href="extensions.html">Extensions</a>
+<ul><li>
+<a href="ext_ffi.html">FFI Library</a>
+<ul><li>
+<a href="ext_ffi_tutorial.html">FFI Tutorial</a>
+</li><li>
+<a href="ext_ffi_api.html">ffi.* API</a>
+</li><li>
+<a href="ext_ffi_semantics.html">FFI Semantics</a>
+</li></ul>
+</li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
+<a href="ext_jit.html">jit.* Library</a>
+</li><li>
+<a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
+</li><li>
+<a class="current" href="changes_openresty_port.html">OpenResty Port Changes</a>
+</li></ul>
+</li><li>
+<a href="https://luajit.org/status.html">Status <span class="ext">&raquo;</span></a>
+</li><li>
+<a href="https://luajit.org/faq.html">FAQ <span class="ext">&raquo;</span></a>
+</li><li>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+</li></ul>
+</div>
+<div id="main">
+
+<p>
+本页汇总本分支从 OpenResty LuaJIT（<tt>openresty/luajit2</tt>）移植的全部特性、
+相对参考实现的修正，以及未移植项及原因。
+验证平台：WSL2（GCC x64）与 Windows（MSVC x64），两平台均构建通过并跑完回归。
+各特性的详细使用说明见 <a href="extensions.html">Extensions</a>。
+</p>
+
+<h2 id="lua_api">1. 新增 Lua 与 C API</h2>
+<table class="port">
+<tr class="porthead">
+<td class="portfeat">特性</td>
+<td class="portwhere">实现位置</td>
+<td class="portnote">要点</td>
+</tr>
+<tr class="odd separate">
+<td class="portfeat"><tt>table.isempty</tt><br><tt>table.isarray</tt><br><tt>table.nkeys</tt><br><tt>table.clone</tt></td>
+<td class="portwhere"><tt>src/lj_tab.c</tt><br><tt>src/lib_table.c</tt><br><tt>src/lj_ircall.h</tt><br><tt>src/lj_ffrecord.c</tt></td>
+<td class="portnote">预加载模块（<tt>require "table.nkeys"</tt> 等）+ JIT 录制器；
+<tt>table.clone</tt> 不能复用 <tt>lj_tab_dup</tt>（模板表语义会清空表值字段），
+改为数组部分逐个 <tt>copyTV</tt>、哈希部分逐个 <tt>lj_tab_set</tt></td>
+</tr>
+<tr class="even">
+<td class="portfeat"><tt>jit.prngstate()</tt></td>
+<td class="portwhere"><tt>src/lib_jit.c</tt><br><tt>src/lj_jit.h</tt><br><tt>src/lj_trace.c</tt><br><tt>src/lj_record.c</tt></td>
+<td class="portnote">返回/设置 8 个无符号 32 位字（标量或 ≤8 元素数组）；
+与 JIT 侧 hotcount/penalty 随机化共用，不影响 <tt>math.random</tt></td>
+</tr>
+<tr class="odd">
+<td class="portfeat"><tt>lua_resetthread</tt></td>
+<td class="portwhere"><tt>src/lj_api.c</tt><br><tt>src/lua.h</tt></td>
+<td class="portnote"><tt>HAVE_LUA_RESETTHREAD</tt>；重置线程并关闭其自身 open upvalue；
+修正参考实现误关调用者 upvalue 的问题</td>
+</tr>
+<tr class="even">
+<td class="portfeat"><tt>thread.exdata</tt><br><tt>thread.exdata2</tt></td>
+<td class="portwhere"><tt>src/lib_base.c</tt><br><tt>src/lj_ffrecord.c</tt><br><tt>src/lj_ir.h</tt><br><tt>src/lj_obj.h</tt></td>
+<td class="portnote">以 <tt>cdata&lt;void *&gt;</tt> 读写线程附加指针；
+<tt>LREF(THREAD)</tt> + <tt>FLOAD</tt> + <tt>CNEWI</tt> 录制；新线程继承创建者，重置后继承调用者</td>
+</tr>
+<tr class="odd">
+<td class="portfeat"><tt>lua_setexdata</tt><br><tt>lua_getexdata</tt><br><tt>lua_setexdata2</tt><br><tt>lua_getexdata2</tt></td>
+<td class="portwhere"><tt>src/lj_api.c</tt><br><tt>src/lj_state.c</tt><br><tt>src/lj_lib.c</tt></td>
+<td class="portnote"><tt>HAVE_LUA_EXDATA2</tt>；配套补齐
+<tt>lj_lib_checkcdata()</tt> 与 <tt>LJ_ERR_FFI_NOTLOAD</tt></td>
+</tr>
+<tr class="even">
+<td class="portfeat"><tt>OPENRESTY_LUAJIT</tt> 宏</td>
+<td class="portwhere"><tt>src/luajit.h</tt><br><tt>src/luajit_rolling.h</tt></td>
+<td class="portnote">由 <tt>luajit_rolling.h</tt> 生成版本头，重新生成时不会丢失</td>
+</tr>
+</table>
+
+<h2 id="params">2. 优化与默认参数</h2>
+
+<h3 id="jit_params">2.1 JIT 默认参数</h3>
+<table class="port">
+<tr class="porthead">
+<td class="portfeat">参数</td>
+<td class="portwhere">旧值</td>
+<td class="portnote">新值</td>
+</tr>
+<tr class="odd separate">
+<td class="portfeat">maxtrace</td><td class="portwhere">1000</td><td class="portnote">8000</td>
+</tr>
+<tr class="even">
+<td class="portfeat">maxrecord</td><td class="portwhere">4000</td><td class="portnote">16000</td>
+</tr>
+<tr class="odd">
+<td class="portfeat">minstitch</td><td class="portwhere">0</td><td class="portnote">3</td>
+</tr>
+<tr class="even">
+<td class="portfeat">maxmcode</td><td class="portwhere">2048 KB</td><td class="portnote">40960 KB</td>
+</tr>
+</table>
+<p>
+其余参数（<tt>maxirconst</tt>、<tt>maxside</tt>、<tt>maxsnap</tt>、<tt>hotloop</tt>、
+<tt>hotexit</tt>、<tt>tryside</tt>、<tt>instunroll</tt>、<tt>loopunroll</tt>、
+<tt>callunroll</tt>、<tt>recunroll</tt>、<tt>sizemcode</tt>）与参考实现一致。
+行为验证（同一二进制内用 <tt>jit.opt.start()</tt> 强制回旧值对照）：
+</p>
+<ul>
+<li><tt>maxtrace</tt>：1200 个常驻 trace 时默认存活 1203 个；强制 1000 时触发上限并 flush，仅存活 204 个。</li>
+<li><tt>maxrecord</tt>：5000 条语句的超长循环体在默认值下成功编译；强制 4000 时报
+<tt>trace too long</tt>。</li>
+<li><tt>maxmcode</tt>：600 个大 trace 默认存活 608 个；强制 2048&nbsp;KB 时出现
+<tt>failed to allocate mcode memory</tt> 并 <tt>[TRACE flush]</tt>，仅存活 192 个。</li>
+</ul>
+
+<h3 id="sse42_hash">2.2 SSE4.2（CRC32）字符串哈希</h3>
+<ul>
+<li>新增 <tt>src/lj_str_hash.c</tt>：移植 <tt>hash_sparse_sse42</tt>（len&lt;4 与 ≥128 常量时间采样，
+[4,16) 两条 CRC32，[16,128) 16 字节步进 CRC32）与 <tt>hash_dense_sse42</tt>（随机 16 块 CRC32 重哈希）。</li>
+<li><tt>src/lj_str.c</tt>：原 ARX 实现改名 <tt>_def</tt>，启用时改为函数指针，并在
+<tt>lj_str_init</tt>（首个字符串驻留之前）用 <tt>lj_vm_cpuid</tt> 检测 SSE4.2 后切换。</li>
+<li><tt>src/lj_arch.h</tt>：x64 + GCC/Clang 默认启用，<tt>-DLUAJIT_DISABLE_SSE42_STRHASH</tt> 可关闭。</li>
+<li><tt>src/Makefile</tt>：<tt>lj_str_hash.o</tt> 入列，新增按文件 <tt>F_CFLAGS</tt> 机制，x64 使用
+<tt>-msse4.2</tt>。</li>
+</ul>
+<p>
+实测（同机交替 4 轮）：查找（len 12/48/200/600）与纯 ARX 持平；
+新建字符串 len48 约快 30–35%，len200 约快 25–30%，len12 持平；
+敌意碰撞串（同首/中/尾字节、len200、1 万条）结果正确且耗时与 ARX 持平。
+</p>
+
+<h3 id="maxupval">2.3 upvalue 上限</h3>
+<p>
+<tt>src/lj_def.h</tt> 的 <tt>LJ_MAX_UPVAL</tt> 由 60 提升到 120
+（<tt>LJ_MAX_VSTACK</tt>、解析器 <tt>uvmap/uvtmp</tt>、<tt>checklimit</tt> 自动适配；
+JIT 侧编码上限为 127，120 在安全范围内）。验证：120 个 upvalue 正常编译运行，
+121 个报 <tt>more than 120 upvalues</tt>，<tt>debug.getupvalue(120)</tt>、
+<tt>string.dump</tt>/<tt>loadstring</tt> 往返、嵌套闭包、高索引 upvalue 的 JIT 录制、
+<tt>-bL</tt> 列表显示 <tt>; u120</tt>、<tt>-b</tt> 字节码保存/加载均正常。
+</p>
+
+<h2 id="bytecode">3. 字节码工具链</h2>
+<ul>
+<li><b><tt>-bL</tt>（列表 + 行号）</b>：<tt>src/lib_jit.c</tt> 的
+<tt>jit.util.funcbc(func, pc, lineinfo)</tt> 新增第 3 参数与第 3 个返回值；
+<tt>src/jit/bc.lua</tt> 增加行号列；<tt>src/jit/bcsave.lua</tt> 新增 <tt>-L</tt> 选项。</li>
+<li><b>常量表</b>：<tt>-bl</tt> 与 <tt>-bL</tt> 均输出负索引 <tt>KGC</tt>
+（字符串/原型/函数/表）与正索引 <tt>KN</tt>（数值常量）。</li>
+<li><b><tt>bcnames</tt> 定宽错位修复</b>：<tt>jit/vmdef.lua</tt> 的 <tt>bcnames</tt> 按 6 字符定宽打包，
+而 Lua&nbsp;5.5 兼容工作新增的 <tt>ERRNNIL</tt>、<tt>VARGIDX</tt> 为 7 字符，
+导致第 73 个操作码起全部右移。已重命名为 <tt>ERRNIL</tt>、<tt>VARGIX</tt>
+（涉及 <tt>src/lj_bc.h</tt>、<tt>src/lj_parse.c</tt>、<tt>src/lj_record.c</tt>、
+<tt>src/lj_meta.c</tt> 及 7 个 <tt>vm_*.dasc</tt>）。</li>
+<li><b><tt>-jdump=b</tt> 源位置</b>：每条录制字节码后追加 <tt>(file:line)</tt>（<tt>src/jit/dump.lua</tt>）。</li>
+<li><b><tt>-b -a</tt> 新架构</b>：<tt>map_arch</tt> 增加 <tt>ppc64</tt>、<tt>ppc64le</tt>、
+<tt>s390x</tt>，可生成对应 ELF 目标文件（Windows 下需配合 <tt>-o linux</tt>）。</li>
+</ul>
+
+<h2 id="debug">4. JIT 调试设施</h2>
+<h3 id="saved_jit_base">4.1 <tt>saved_jit_base</tt></h3>
+<p>
+<tt>src/lj_obj.h</tt> 的 <tt>global_State</tt> 新增 <tt>MRef saved_jit_base</tt>；
+<tt>src/lj_err.c</tt> 的 <tt>lj_err_throw</tt> 在清除 <tt>g-&gt;jit_base</tt> 前先保存，
+使抛错状态下调试器仍能重建 JIT 帧的 Lua 调用栈（与参考实现一致，LuaJIT 自身只写不读）。
+</p>
+<h3 id="trace_logs">4.2 trace 事件日志（<tt>LUA_USE_TRACE_LOGS</tt>）</h3>
+<ul>
+<li><tt>src/lj_debug.h</tt> / <tt>src/lj_debug.c</tt>：64 条事件的内存环形缓冲，
+记录 trace 进入/退出/开始录制（traceno、exitno、是否直接退出、pc、线程、当前函数）。</li>
+<li><tt>src/lj_trace.c</tt>：<tt>trace_start</tt> 记录 START；<tt>lj_trace_exit</tt> 记录 NORMAL EXIT。</li>
+<li><tt>src/vm_x64.dasc</tt>：<tt>-&gt;vm_exit_interp</tt> 记录 DIRECT EXIT；
+<tt>BC_JLOOP</tt> 记录 ENTRY（Win64 按参考实现跳过）。
+<tt>src/vm_x86.dasc</tt> 同样两处，用 <tt>|.if X64</tt> 保护。</li>
+<li>启用方式（VM 钩子的 <tt>#ifdef</tt> 由 buildvm 展开，因此 host 编译也需该宏）：
+<pre class="code">
+make XCFLAGS=-DLUA_USE_TRACE_LOGS HOST_XCFLAGS='-I. -DLUA_USE_TRACE_LOGS'
+</pre></li>
+</ul>
+
+<h2 id="docs">5. 文档更新</h2>
+<ul>
+<li><a href="extensions.html">Extensions</a>：补充上述 Lua/C API、JIT 参数、SSE4.2 哈希、
+upvalue 上限、<tt>thread.exdata</tt>、<tt>OPENRESTY_LUAJIT</tt>、<tt>-bL</tt>、
+<tt>-jdump=b</tt>、trace 日志与 <tt>saved_jit_base</tt> 说明。</li>
+<li><a href="running.html">Running</a>：更新 JIT 参数默认值表
+（<tt>maxtrace</tt>、<tt>maxrecord</tt>、<tt>maxmcode</tt>）。</li>
+<li>本页：移植变更汇总。</li>
+</ul>
+
+<h2 id="verify">6. 验证方法</h2>
+<ul>
+<li>构建：WSL <tt>make -j4</tt>；Windows <tt>Launch-VsDevShell</tt> + <tt>msvcbuild.bat</tt>。</li>
+<li>回归（<tt>d:\srccode\vibecode\ljtest\regress.sh</tt>）：<tt>regress.lua</tt> 在 JIT 与
+<tt>-joff</tt> 下均 <tt>ALL OK</tt>；<tt>-jv</tt> 连续 10 次运行 0 失败；
+基准（named_write / named_dyn / named_dynidx）与改前持平。</li>
+<li>对照验证：<tt>-bL</tt> / <tt>-bl</tt> / <tt>-jdump=b</tt> 与参考实现逐行一致；
+<tt>thread.exdata</tt>、命名变参数值与参考实现、Lua&nbsp;5.5.1 一致；
+C API（<tt>lua_resetthread</tt>、<tt>lua_set/getexdata*</tt>）用独立 C 程序链接
+<tt>libluajit.a</tt> 验证。</li>
+</ul>
+
+<h2 id="not_ported">7. 未移植项及原因</h2>
+<table class="port">
+<tr class="porthead">
+<td class="portitem">项目</td>
+<td class="portitem">原因</td>
+</tr>
+<tr class="odd separate">
+<td class="portitem">s390x、PPC64（OPD/ELFv2/PPC32ON64）架构后端</td>
+<td class="portitem">需要新增 VM 后端（<tt>vm_s390x.dasc</tt>、<tt>dasm_s390x.h</tt> 等）及完整移植，
+属架构移植范畴；仅在 <tt>-b -a</tt> 的对象格式表中支持其目标文件输出</td>
+</tr>
+<tr class="even">
+<td class="portitem"><tt>JIT_F_SSE4_2</tt> 内部标志、<tt>src/lj_init.c</tt> 静态构造函数</td>
+<td class="portitem">参考实现用构造函数选择哈希；本实现在 <tt>lj_str_init</tt> 中直接 CPUID 检测，无需该标志</td>
+</tr>
+<tr class="odd">
+<td class="portitem"><tt>jit/bc.lua</tt> 中被注释掉的 <tt>else</tt> 分支</td>
+<td class="portitem">纯注释，无功能差异</td>
+</tr>
+<tr class="even">
+<td class="portitem"><tt>CCDEBUG= -g</tt> 默认开启、安装符号链接等发行细节</td>
+<td class="portitem">与本分支的构建约定无关</td>
+</tr>
+</table>
+
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2026
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
